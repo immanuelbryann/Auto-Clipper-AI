@@ -14,19 +14,9 @@ def _zero_gpu_init():
 import gradio as gr
 from backend.main import app as fastapi_app
 
-# Create Gradio Blocks UI that embeds the full-screen React SPA web interface
-with gr.Blocks(title="Auto Clipper AI", css="footer {visibility: hidden}") as demo:
-    gr.HTML("""
-        <iframe 
-            src="/index.html" 
-            style="width: 100%; height: 92vh; border: none; border-radius: 12px; background: #080808;"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-            allowfullscreen>
-        </iframe>
-    """)
+# Create minimal Gradio Blocks to satisfy Hugging Face Space runner
+with gr.Blocks(title="Auto Clipper AI") as demo:
+    pass
 
-# Mount FastAPI app onto Gradio
-app = gr.mount_gradio_app(fastapi_app, demo, path="/")
-
-# Launch Gradio server on 0.0.0.0:7860
-demo.launch(server_name="0.0.0.0", server_port=7860)
+# Mount Gradio onto FastAPI under /gradio path, so FastAPI controls / and serves dist/index.html directly
+app = gr.mount_gradio_app(fastapi_app, demo, path="/gradio")

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List
 from backend.db import init_db, get_all_history, delete_history
@@ -454,12 +455,6 @@ def get_video(path: str):
     return FileResponse(abs_path, media_type="video/mp4", filename=os.path.basename(abs_path))
 
 
-if __name__ == "__main__":
-    import uvicorn
-    import socket
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
 # Mount React Frontend SPA from dist folder if built
 dist_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist"))
 if os.path.exists(dist_dir):
@@ -469,7 +464,7 @@ if os.path.exists(dist_dir):
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        if full_path in ["health", "heartbeat", "generate", "video", "history", "probe", "upload", "open_folder", "save_file"] or full_path.startswith("api/"):
+        if full_path in ["health", "heartbeat", "generate", "video", "history", "probe", "upload", "open_folder", "save_file"] or full_path.startswith("api/") or full_path.startswith("gradio"):
             return JSONResponse(status_code=404, content={"detail": "Not found"})
         file_path = os.path.join(dist_dir, full_path)
         if os.path.isfile(file_path):
@@ -477,7 +472,12 @@ if os.path.exists(dist_dir):
         return FileResponse(os.path.join(dist_dir, "index.html"))
 
 if __name__ == "__main__":
+    import uvicorn
+    import socket
     import sys
+    import threading
+    import os
+    import time
     import threading
     import os
     import time
