@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Server, Check, RefreshCw, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Server, Check, RefreshCw, ShieldAlert } from 'lucide-react';
 import { InputGroup } from '../ui/InputGroup';
 import { Button } from '../ui/Button';
 import axios from 'axios';

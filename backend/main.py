@@ -457,10 +457,29 @@ def get_video(path: str):
 if __name__ == "__main__":
     import uvicorn
     import socket
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+# Mount React Frontend SPA from dist folder if built
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist"))
+if os.path.exists(dist_dir):
+    assets_dir = os.path.join(dist_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path in ["health", "heartbeat", "generate", "video", "history", "probe", "upload", "open_folder", "save_file"] or full_path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        file_path = os.path.join(dist_dir, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(dist_dir, "index.html"))
+
+if __name__ == "__main__":
     import sys
     import threading
     import os
-
     import time
 
     # Watchdog thread: kills backend if no heartbeat received from frontend in 30 seconds
@@ -495,4 +514,4 @@ if __name__ == "__main__":
     print(f"TOKEN:{API_SECRET_TOKEN}")
     sys.stdout.flush()
 
-    uvicorn.run(app, host="127.0.0.1", port=port, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)

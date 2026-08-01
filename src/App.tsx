@@ -19,7 +19,9 @@ import { ProviderId, DEFAULT_PROVIDER } from "./lib/providers";
 export let API_URL =
   localStorage.getItem("ac_backend_url") ||
   (import.meta as any).env?.VITE_API_URL ||
-  "http://127.0.0.1:8000";
+  (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+    ? "http://127.0.0.1:8000"
+    : window.location.origin);
 
 export function setApiUrl(url: string) {
   API_URL = url.trim().replace(/\/+$/, "");
