@@ -7,17 +7,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Create non-root user 1000 for Hugging Face Spaces compatibility
+RUN useradd -m -u 1000 user
+WORKDIR /home/user/app
 
 # Copy and install python dependencies
-COPY backend/requirements.txt ./backend/
+COPY --chown=user:user backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # Copy backend source code
-COPY backend ./backend
+COPY --chown=user:user backend ./backend
 
-# Environment configuration
-ENV PORT=8000
+USER user
+
+# Hugging Face default port is 7860
+ENV PORT=7860
+EXPOSE 7860
 EXPOSE 8000
 
-CMD ["python", "backend/main.py"]
+CMD ["python", "-m", "backend.main"]

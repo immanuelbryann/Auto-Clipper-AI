@@ -1,3 +1,12 @@
+---
+title: Auto Clipper AI Backend
+emoji: ✂️
+colorFrom: yellow
+colorTo: red
+sdk: docker
+app_port: 7860
+---
+
 <div align="center">
   <h1>✂️ Auto Clipper</h1>
   <p><strong>Ubah Video YouTube Berjam-jam Menjadi Shorts Viral dalam 5 Menit. Tanpa Edit Manual.</strong></p>
@@ -26,41 +35,5 @@ Karena aplikasi ini melakukan pemrosesan video dan pelacakan wajah secara lokal,
 
 - **Sistem Operasi:** Windows 10/11 (64-bit)
 - **Prosesor (CPU):** Intel Core i5 (Generasi ke-8) atau AMD Ryzen 5 (Multicore sangat disarankan untuk kecepatan _render_ video)
-- **RAM:** Minimal 8 GB (Direkomendasikan 16 GB untuk pemrosesan video HD)
+- **RAM:** Minimal 8 GB (Direkomensingan 16 GB untuk pemrosesan video HD)
 - **Penyimpanan:** Minimal 2 GB ruang kosong (siapkan ruang tambahan untuk menyimpan file video asli yang diunduh)
-- **Koneksi Internet:** Wajib (untuk mengunduh video YouTube dan memanggil API transkripsi/AI)
-
-## 🚀 Cara Instalasi & Penggunaan
-
-### Opsi 1: Menggunakan Installer Praktis (Rekomendasi)
-
-Anda tidak perlu repot dengan terminal. Semua komponen yang dibutuhkan sudah kami bundel menjadi satu.
-
-**Langkah Pemasangan:**
-
-1. Buka halaman **[Releases](../../releases)** kami.
-2. Unduh file installer `.exe` versi terbaru.
-3. Klik ganda (Double-click) file yang sudah diunduh dan instal seperti biasa. Aplikasi siap digunakan!
-
-### Opsi 2: Menjalankan Mode Developer (Build Source)
-
-Jika Anda ingin ikut berkontribusi atau mengembangkan fitur baru:
-
-1. **Persiapan:** Pastikan Anda memiliki Node.js (v20+), Python (3.11+), Rust / Cargo (untuk build desktop), dan OpenAI API Key.
-2. **Jalankan Backend (Python):**
-   _(Tauri akan menjalankan sidecar backend secara otomatis, tetapi untuk build awal sidecar-nya Anda perlu meng-compile-nya sekali saja)_
-   ```bash
-   pip install pyinstaller
-   pyinstaller --onefile backend/main.py --name backend
-   mkdir bin
-   # Salin dist/backend.exe ke bin/backend-<TARGET_TRIPLET>.exe (sesuaikan dengan OS Anda)
-   ```
-3. **Jalankan Frontend (Tauri/React):** Buka terminal baru di root proyek:
-   ```bash
-   npm install
-   npm run tauri dev
-   ```
-
----
-
-_Dibuat untuk para kreator yang lebih suka membuat konten daripada terjebak di ruang editing._
