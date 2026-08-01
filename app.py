@@ -11,10 +11,5 @@ from backend.main import app as fastapi_app
 with gr.Blocks(title="Auto Clipper AI") as demo:
     gr.Markdown("# ✂️ Auto Clipper AI")
 
-# Mount FastAPI app onto Gradio
+# Mount FastAPI app onto Gradio. Hugging Face automatically imports and serves 'app'
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", "7860"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
