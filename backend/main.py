@@ -478,23 +478,21 @@ if __name__ == "__main__":
             if time.time() - last_heartbeat > 30:
                 os._exit(0)
 
-    # Start the watchdog as a daemon thread
-    threading.Thread(target=watchdog, daemon=True).start()
+    # Start the watchdog as a daemon thread only if explicitly enabled
+    if os.environ.get("ENABLE_WATCHDOG") == "1":
+        threading.Thread(target=watchdog, daemon=True).start()
 
-    # Find a free port dynamically
-    def get_free_port():
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
+    # Default to 8000 for web app compatibility
+    port_env = os.environ.get("PORT")
+    if port_env:
+        port = int(port_env)
+    else:
+        port = 8000
 
-    port = get_free_port()
-    
-    # Cetak port ke stdout agar ditangkap oleh frontend
+    # Print port to stdout
     print(f"AUTO_CLIPPER_BACKEND_PORT={port}")
     print(f"PORT:{port}")
     print(f"TOKEN:{API_SECRET_TOKEN}")
     sys.stdout.flush()
 
-    # reload=False: the reloader spawns an extra child process that Electron/Tauri
-    # can't reliably kill on Windows, leaving a zombie backend.
     uvicorn.run(app, host="127.0.0.1", port=port, reload=False)
