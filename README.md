@@ -3,8 +3,10 @@ title: Auto Clipper AI Backend
 emoji: ✂️
 colorFrom: yellow
 colorTo: red
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 4.25.0
+app_file: app.py
+pinned: false
 ---
 
 <div align="center">
