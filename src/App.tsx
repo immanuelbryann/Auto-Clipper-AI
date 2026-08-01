@@ -16,14 +16,31 @@ import { useUserSettings } from "./hooks/useUserSettings";
 import { useClipJobs } from "./hooks/useClipJobs";
 import { ProviderId, DEFAULT_PROVIDER } from "./lib/providers";
 
-export let API_URL = "http://127.0.0.1:8000";
+export let API_URL =
+  localStorage.getItem("ac_backend_url") ||
+  (import.meta as any).env?.VITE_API_URL ||
+  "http://127.0.0.1:8000";
+
 export function setApiUrl(url: string) {
-  API_URL = url;
+  API_URL = url.trim().replace(/\/+$/, "");
+  if (url) {
+    localStorage.setItem("ac_backend_url", API_URL);
+  } else {
+    localStorage.removeItem("ac_backend_url");
+  }
 }
 
 export const AppContext = React.createContext<any>(null);
 
 export default function App() {
+  const [backendUrl, setBackendUrlState] = useState<string>(() => API_URL);
+
+  const updateBackendUrl = (newUrl: string) => {
+    const clean = newUrl.trim().replace(/\/+$/, "");
+    setBackendUrlState(clean);
+    setApiUrl(clean);
+  };
+
   const {
     isInitializing,
     apiKeys,
@@ -135,6 +152,8 @@ export default function App() {
   }
 
   const contextValue = {
+    backendUrl,
+    updateBackendUrl,
     theme,
     setTheme,
     notify,

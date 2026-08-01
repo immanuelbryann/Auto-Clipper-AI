@@ -34,15 +34,7 @@ app = FastAPI(title="Auto Clipper API")
 
 app.add_middleware(
     CORSMiddleware,
-    # Batasi ke asal Electron atau Vite dev server
-    allow_origins=[
-        "http://localhost:5173", 
-        "http://127.0.0.1:5173",
-        "app://.",
-        "file://",
-        "http://tauri.localhost",
-        "https://tauri.localhost"
-    ],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -2,6 +2,7 @@ import React, { useContext } from 'react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { AppContext } from '../App';
 import { AppearanceSection } from '../components/settings/AppearanceSection';
+import { BackendSection } from '../components/settings/BackendSection';
 import { ProviderSection } from '../components/settings/ProviderSection';
 import { OutputSection } from '../components/settings/OutputSection';
 import { UpdaterSection } from '../components/settings/UpdaterSection';
@@ -16,6 +17,10 @@ export const SettingsPage: React.FC = () => {
         subtitle="Manage application preferences & API keys"
       />
       <div className="max-w-3xl mx-auto flex flex-col gap-5 pb-12">
+        <BackendSection
+          backendUrl={ctx.backendUrl}
+          onUpdateBackendUrl={ctx.updateBackendUrl}
+        />
         <AppearanceSection theme={ctx.theme} setTheme={ctx.setTheme} />
         <ProviderSection
           provider={ctx.provider}
