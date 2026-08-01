@@ -5,7 +5,7 @@ echo           Auto Clipper Web App Launcher
 echo ===================================================
 echo.
 echo [1/3] Starting Python Backend Server (Port 8000)...
-start "Auto Clipper Backend" /min cmd /c "python backend/main.py"
+start "Auto Clipper Backend" /min cmd /c "py -3.13 -m backend.main"
 
 echo [2/3] Waiting for Backend Server...
 timeout /t 3 /nobreak >nul
