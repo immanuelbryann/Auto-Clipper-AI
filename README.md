@@ -3,8 +3,10 @@ title: Auto Clipper AI Backend
 emoji: ✂️
 colorFrom: yellow
 colorTo: red
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 4.25.0
+app_file: app.py
+pinned: false
 ---
 
 <div align="center">
@@ -35,5 +37,5 @@ Karena aplikasi ini melakukan pemrosesan video dan pelacakan wajah secara lokal,
 
 - **Sistem Operasi:** Windows 10/11 (64-bit)
 - **Prosesor (CPU):** Intel Core i5 (Generasi ke-8) atau AMD Ryzen 5 (Multicore sangat disarankan untuk kecepatan _render_ video)
-- **RAM:** Minimal 8 GB (Direkomensingan 16 GB untuk pemrosesan video HD)
+- **RAM:** Minimal 8 GB (Direkomendasikan 16 GB untuk pemrosesan video HD)
 - **Penyimpanan:** Minimal 2 GB ruang kosong (siapkan ruang tambahan untuk menyimpan file video asli yang diunduh)
