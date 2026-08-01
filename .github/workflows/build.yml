@@ -1,0 +1,116 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+
+      - name: Setup FFmpeg
+        run: npm install @ffmpeg-installer/ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Build Python Backend
+        run: |
+          pyinstaller --onefile backend/main.py --name backend
+
+      - name: Prepare bin directory with Backend and FFmpeg
+        shell: bash
+        run: |
+          cat << 'EOF' > copy_bin.py
+          import os, sys, shutil, subprocess
+          os.makedirs('src-tauri/bin', exist_ok=True)
+          exe_ext = '.exe' if sys.platform == 'win32' else ''
+          
+          target = '${{ matrix.target }}'
+          
+          # Copy backend executable with target triplet (for Tauri externalBin)
+          shutil.copy(os.path.join('dist', f'backend{exe_ext}'), os.path.join('src-tauri', 'bin', f'backend-{target}{exe_ext}'))
+          
+          # Copy ffmpeg executable
+          try:
+              ffmpeg_path = subprocess.check_output(['node', '-e', "console.log(require('@ffmpeg-installer/ffmpeg').path)"]).decode('utf-8').strip()
+              shutil.copy(ffmpeg_path, os.path.join('src-tauri', 'bin', f'ffmpeg{exe_ext}'))
+          except Exception as e:
+              print('Error: ffmpeg not found!', e)
+              sys.exit(1)
+          EOF
+          python copy_bin.py
+
+      - name: Ad-hoc codesign macOS binaries
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          # Ensure the executable bit survived the copy, then apply an ad-hoc
+          # signature. Unsigned PyInstaller binaries are frequently "Killed: 9"
+          # by macOS on launch; an ad-hoc signature lets them run once the user
+          # has cleared the download quarantine (see README macOS notes).
+          chmod +x "src-tauri/bin/backend-${{ matrix.target }}" "src-tauri/bin/ffmpeg" || true
+          codesign --force --deep --sign - "src-tauri/bin/backend-${{ matrix.target }}"
+          codesign --force --sign - "src-tauri/bin/ffmpeg" || true
+          codesign --verify --verbose "src-tauri/bin/backend-${{ matrix.target }}" || true
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: "Auto Clipper v__VERSION__"
+          releaseBody: "See the assets to download this version and install."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: --target ${{ matrix.target }}

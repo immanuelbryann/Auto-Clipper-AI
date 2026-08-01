@@ -1,0 +1,508 @@
+from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
+from typing import List
+from backend.db import init_db, get_all_history, delete_history
+from backend.jobs import create_job, get_job, cancel_job
+from backend.ai_utils import ping_provider
+from backend.video_utils import probe_formats
+import os
+import sys
+import shutil
+import re
+import secrets
+from starlette.requests import Request
+
+API_SECRET_TOKEN = secrets.token_hex(32)
+
+# Jika dijalankan sebagai PyInstaller bundle, tambahkan folder executable ke PATH
+# agar FFmpeg dan dependensi lain yang dibundel bisa ditemukan.
+if getattr(sys, 'frozen', False):
+    bin_dir = os.path.dirname(sys.executable)
+    paths = [
+        bin_dir,
+        os.path.join(bin_dir, "bin"), # Windows resource path
+        os.path.join(os.path.dirname(bin_dir), "Resources", "bin") # macOS resource path
+    ]
+    os.environ["PATH"] = os.pathsep.join(paths) + os.pathsep + os.environ.get("PATH", "")
+
+# Initialize DB on startup
+init_db()
+
+app = FastAPI(title="Auto Clipper API")
+
+app.add_middleware(
+    CORSMiddleware,
+    # Batasi ke asal Electron atau Vite dev server
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173",
+        "app://.",
+        "file://",
+        "http://tauri.localhost",
+        "https://tauri.localhost"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.middleware("http")
+async def verify_token(request: Request, call_next):
+    # Biarkan endpoint tertentu tanpa token (video player tidak bisa mengirim header dengan mudah)
+    path = request.url.path
+    if request.method == "OPTIONS" or path.startswith("/video") or path in ["/health", "/heartbeat"]:
+        return await call_next(request)
+        
+    # Skip token verification in development mode (not PyInstaller bundle)
+    import sys
+    if not getattr(sys, 'frozen', False):
+        return await call_next(request)
+        
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or auth_header != f"Bearer {API_SECRET_TOKEN}":
+        return JSONResponse(status_code=401, content={"status": "error", "message": "Unauthorized API access"})
+        
+    return await call_next(request)
+
+from backend.db import init_db, get_all_history, delete_history, get_app_data_dir
+
+@app.post("/upload")
+def api_upload_video(file: UploadFile = File(...)):
+    temp_dir = os.path.abspath(os.path.join(get_app_data_dir(), "temp_downloads"))
+    os.makedirs(temp_dir, exist_ok=True)
+    file_path = os.path.join(temp_dir, f"upload_{file.filename}")
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    # Return local path prefixed with local: so jobs.py knows to skip download
+    return {"status": "success", "url": f"local:{file_path}"}
+
+@app.get("/probe")
+def api_probe(url: str):
+    """Return available video heights (descending) for a source URL."""
+    if not url or url.startswith("local:") or not is_valid_source_url(url):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "URL tidak valid untuk probing."})
+    try:
+        return {"status": "success", "heights": probe_formats(url.strip())}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
+class TestAiRequest(BaseModel):
+    provider: str
+    api_key: str
+    custom_base_url: str = ""
+    custom_model_name: str = ""
+
+class GenerateSocialKitRequest(BaseModel):
+    description: str
+    provider: str = "openai"
+    api_key: str = ""
+    custom_base_url: str = ""
+    custom_model_name: str = ""
+
+@app.post("/api/settings/test-ai")
+def api_test_ai(req: TestAiRequest):
+    try:
+        from backend.ai_utils import ping_provider
+        ping_provider(req.provider, req.api_key.strip(), req.custom_base_url.strip(), req.custom_model_name.strip())
+        return {"status": "success", "message": "API Key is valid!"}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+class TestPexelsRequest(BaseModel):
+    api_key: str
+
+@app.post("/api/settings/test-pexels")
+def api_test_pexels(req: TestPexelsRequest):
+    try:
+        from backend.broll import ping_pexels
+        ping_pexels(req.api_key.strip())
+        return {"status": "success", "message": "Pexels API Key is valid!"}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+class CreateJobRequest(BaseModel):
+    url: str
+    provider: str = "openai"
+    api_key: str = ""
+    aspect_ratio: str = "9:16"
+    caption_style: str = "standard"
+    burn_subs: bool = True
+    output_dir: str = ""
+    quality: str = "best"
+    extra_prompt: str = ""
+    title: str = ""
+    enable_broll: bool = False
+    pexels_api_key: str = ""
+    max_clips: int = 0
+    custom_base_url: str = ""
+    custom_model_name: str = ""
+    is_gaming_video: bool = False
+
+class SaveFileRequest(BaseModel):
+    src: str
+    dest: str
+
+@app.post("/save_file")
+def api_save_file(req: SaveFileRequest):
+    try:
+        abs_src = os.path.abspath(req.src)
+        app_data = os.path.abspath(get_app_data_dir())
+        # Only allow copying files that originate from our AppData directory
+        if not abs_src.startswith(app_data):
+            return JSONResponse(status_code=403, content={"status": "error", "message": "Hanya diperbolehkan menyalin file dari direktori internal aplikasi."})
+            
+        shutil.copy2(req.src, req.dest)
+        return {"status": "success"}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+class OpenFolderRequest(BaseModel):
+    path: str
+
+@app.post("/open_folder")
+def api_open_folder(req: OpenFolderRequest):
+    try:
+        import subprocess
+        folder_path = req.path
+        if not os.path.exists(folder_path):
+            folder_path = os.path.dirname(req.path)
+            
+        if not os.path.exists(folder_path):
+            return JSONResponse(status_code=404, content={"status": "error", "message": "Folder not found"})
+            
+        if os.path.isfile(folder_path):
+            folder_path = os.path.dirname(folder_path)
+
+        if sys.platform == 'win32':
+            os.startfile(folder_path)
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', folder_path])
+        else:
+            subprocess.Popen(['xdg-open', folder_path])
+        return {"status": "success"}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+@app.post("/jobs/{job_id}/rerender")
+def api_rerender_job(job_id: str, req: CreateJobRequest):
+    try:
+        from backend.jobs import create_rerender_job
+        new_job_id = create_rerender_job(job_id, req.aspect_ratio, req.burn_subs, req.output_dir, req.max_clips)
+        return {"status": "success", "job_id": new_job_id}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+@app.post("/jobs/{job_id}/rerun_ai")
+def api_rerun_ai_job(job_id: str, req: CreateJobRequest):
+    try:
+        ping_provider(req.provider, req.api_key.strip(), req.custom_base_url.strip(), req.custom_model_name.strip())
+        from backend.jobs import create_rerun_ai_job
+        new_job_id = create_rerun_ai_job(
+            job_id, req.provider, req.api_key.strip(),
+            req.aspect_ratio, req.burn_subs, req.output_dir, req.extra_prompt, req.max_clips,
+            req.custom_base_url.strip(), req.custom_model_name.strip(), req.is_gaming_video
+        )
+        return {"status": "success", "job_id": new_job_id}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+from pydantic import BaseModel
+from typing import Optional
+
+class ResumeJobRequest(BaseModel):
+    api_key: Optional[str] = None
+    provider: Optional[str] = None
+    custom_base_url: Optional[str] = None
+    custom_model_name: Optional[str] = None
+
+@app.post("/jobs/{job_id}/resume")
+def api_resume_job(job_id: str, req: ResumeJobRequest):
+    try:
+        from backend.jobs import create_resume_job
+        new_job_id = create_resume_job(
+            job_id,
+            fallback_api_key=req.api_key,
+            fallback_provider=req.provider,
+            fallback_custom_base_url=req.custom_base_url,
+            fallback_custom_model_name=req.custom_model_name
+        )
+        return {"status": "success", "job_id": new_job_id}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+class ResumeManualJobRequest(BaseModel):
+    json_payload: str
+
+@app.post("/jobs/{job_id}/resume-manual")
+def api_resume_manual_job(job_id: str, req: ResumeManualJobRequest):
+    try:
+        from backend.jobs import resume_manual_job
+        new_job_id = resume_manual_job(job_id, req.json_payload)
+        return {"status": "success", "job_id": new_job_id}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+SUPPORTED_URL_RE = re.compile(
+    r'^(https?://)?(www\.|m\.)?'
+    r'(youtube\.com|youtu\.be|tiktok\.com|vt\.tiktok\.com|instagram\.com|x\.com|twitter\.com)/.+',
+    re.IGNORECASE,
+)
+
+
+def is_valid_source_url(url: str) -> bool:
+    """Whitelist of platforms we route to yt-dlp, plus local uploads."""
+    if not url:
+        return False
+    if url.startswith("local:"):
+        return True
+    return bool(SUPPORTED_URL_RE.match(url.strip()))
+
+
+@app.post("/jobs")
+def api_create_job(req: CreateJobRequest):
+    if not req.url:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "URL is required"})
+
+    if not is_valid_source_url(req.url):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "URL tidak valid. Didukung: YouTube, TikTok, Instagram, X/Twitter, atau upload file lokal."})
+
+    try:
+        ping_provider(req.provider, req.api_key.strip(), req.custom_base_url.strip(), req.custom_model_name.strip())
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+    job_id = create_job(
+        req.url.strip(), req.provider, req.api_key.strip(),
+        req.aspect_ratio, req.caption_style, req.burn_subs, req.output_dir, req.quality,
+        req.title, req.enable_broll, req.pexels_api_key.strip(), req.max_clips,
+        req.custom_base_url.strip(), req.custom_model_name.strip(), req.is_gaming_video
+    )
+    return {"status": "success", "job_id": job_id}
+
+@app.get("/jobs/{job_id}")
+def api_get_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Job not found"})
+    # Only return safe fields to frontend
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "progress": job["progress"],
+        "clips": job["clips"],
+        "failed": job.get("failed", 0),
+        "error": job["error"]
+    }
+
+@app.post("/jobs/{job_id}/clips/{clip_index}/social")
+def api_generate_social_kit(job_id: str, clip_index: int, req: GenerateSocialKitRequest):
+    from backend.jobs import get_job
+    from backend.db import get_history, save_history
+    from backend.ai_utils import generate_social_kit_only
+    
+    job = get_job(job_id)
+    is_active = True
+    if not job:
+        job = get_history(job_id)
+        is_active = False
+        
+    if not job:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Job not found"})
+        
+    clips = job.get("clips") if is_active else job.get("result_clips")
+    
+    if not clips or clip_index < 0 or clip_index >= len(clips):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Clip not found"})
+
+    try:
+        social_kit = generate_social_kit_only(
+            description=req.description,
+            api_key=req.api_key.strip(),
+            provider=req.provider,
+            base_url=req.custom_base_url.strip(),
+            model=req.custom_model_name.strip()
+        )
+        
+        clips[clip_index]["social"] = social_kit
+        
+        if not is_active:
+            save_history(job["id"], job["url"], job["status"], clips, job.get("metadata"))
+            
+        return {"status": "success", "social": social_kit}
+    except Exception as e:
+        debug_msg = f"DEBUG [provider={req.provider}, key_len={len(req.api_key.strip())}, base_url={req.custom_base_url}]. Error: {str(e)}"
+        return JSONResponse(status_code=500, content={"status": "error", "message": debug_msg})
+
+@app.post("/jobs/{job_id}/cancel")
+def api_cancel_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Job not found"})
+    cancel_job(job_id)
+    return {"status": "success"}
+
+@app.get("/history")
+def api_get_history():
+    return {"status": "success", "history": get_all_history()}
+
+@app.delete("/history/{job_id}")
+def api_delete_history(job_id: str):
+    delete_history(job_id)
+    return {"status": "success"}
+
+
+class ExtractMetadataRequest(BaseModel):
+    path: str
+    type: List[str] = ["silence"]
+
+
+@app.post("/api/extract-metadata")
+def api_extract_metadata(req: ExtractMetadataRequest):
+    """Kick off async metadata extraction (silence / peaks / thumbnails).
+
+    Returns a job_id immediately; the frontend polls GET /api/metadata/{id}.
+    """
+    path = req.path
+    if path.startswith("local:"):
+        path = path.split("local:")[1]
+    if not path or not os.path.exists(path):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "File tidak ditemukan."})
+    from backend.metadata import create_metadata_job
+    job_id = create_metadata_job(path, req.type)
+    return {"status": "success", "job_id": job_id}
+
+
+@app.get("/api/metadata/{job_id}")
+def api_get_metadata(job_id: str):
+    from backend.metadata import get_metadata_job
+    job = get_metadata_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Job not found"})
+    return {
+        "status": job["status"],
+        "progress": job.get("progress", ""),
+        "duration": job.get("duration"),
+        "silence": job.get("silence"),
+        "peaks": job.get("peaks"),
+        "thumbnails": job.get("thumbnails"),
+        "error": job.get("error"),
+        "errors": job.get("errors", {}),
+    }
+
+
+@app.get("/api/thumbnails")
+def api_get_thumbnails(path: str, start: float = 0.0, end: float = 0.0, count: int = 12):
+    """On-demand filmstrip thumbnails for a time window (zoomable timeline)."""
+    p = path
+    if p.startswith("local:"):
+        p = p.split("local:")[1]
+    if not p or not os.path.exists(p):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "File tidak ditemukan."})
+    if end <= start:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Rentang waktu tidak valid."})
+    try:
+        from backend.metadata import generate_thumbnails_window
+        uris = generate_thumbnails_window(p, start, end, count)
+        return {"status": "success", "start": start, "end": end, "count": len(uris), "thumbnails": uris}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+class ManualJobRequest(BaseModel):
+    url: str
+    clips: List[dict] = []
+    aspect_ratio: str = "9:16"
+    caption_style: str = "standard"
+    burn_subs: bool = True
+    output_dir: str = ""
+    quality: str = "best"
+    title: str = ""
+    is_gaming_video: bool = False
+
+
+@app.post("/jobs/manual")
+def api_create_manual_job(req: ManualJobRequest):
+    if not req.url:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "URL is required"})
+    if not is_valid_source_url(req.url):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "URL tidak valid untuk klip manual."})
+
+    try:
+        from backend.jobs import create_manual_job
+        job_id = create_manual_job(
+            req.url.strip(), req.clips, req.aspect_ratio, req.caption_style,
+            req.burn_subs, req.output_dir, req.quality, req.title, req.is_gaming_video
+        )
+        return {"status": "success", "job_id": job_id}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+
+
+@app.get("/video")
+def get_video(path: str):
+    """Serve a generated clip so the frontend can preview it inline.
+
+    Restricted to files inside the temp downloads directory. Starlette's
+    FileResponse handles HTTP Range requests, so seeking works in the player.
+    """
+    abs_path = os.path.abspath(path)
+    temp_dir = os.path.abspath(os.path.join(get_app_data_dir(), "temp_downloads"))
+    if not abs_path.startswith(temp_dir) or not os.path.exists(abs_path):
+        return JSONResponse(status_code=404, content={"status": "error", "message": "File not found"})
+    return FileResponse(abs_path, media_type="video/mp4", filename=os.path.basename(abs_path))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import socket
+    import sys
+    import threading
+    import os
+
+    import time
+
+    # Watchdog thread: kills backend if no heartbeat received from frontend in 30 seconds
+    last_heartbeat = time.time()
+
+    @app.post("/heartbeat")
+    def api_heartbeat():
+        global last_heartbeat
+        last_heartbeat = time.time()
+        return {"status": "ok"}
+
+    def watchdog():
+        while True:
+            time.sleep(5)
+            if time.time() - last_heartbeat > 30:
+                os._exit(0)
+
+    # Start the watchdog as a daemon thread
+    threading.Thread(target=watchdog, daemon=True).start()
+
+    # Find a free port dynamically
+    def get_free_port():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+    port = get_free_port()
+    
+    # Cetak port ke stdout agar ditangkap oleh frontend
+    print(f"AUTO_CLIPPER_BACKEND_PORT={port}")
+    print(f"PORT:{port}")
+    print(f"TOKEN:{API_SECRET_TOKEN}")
+    sys.stdout.flush()
+
+    # reload=False: the reloader spawns an extra child process that Electron/Tauri
+    # can't reliably kill on Windows, leaving a zombie backend.
+    uvicorn.run(app, host="127.0.0.1", port=port, reload=False)

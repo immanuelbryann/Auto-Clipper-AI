@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+node_modules/
+dist/
+temp_downloads/
+*.log
+*.db
+*.ass
+release/
+
+# Tauri & Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Build & Binaries (PyInstaller)
+build/
+bin/
+*.spec
+
+# Local config/vaults
+ac_vault*
+.ac_vault*
+.env
+
+# Docs
+docs/
+
+# Worktrees
+.worktrees/
+worktrees/
