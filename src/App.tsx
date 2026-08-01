@@ -16,12 +16,12 @@ import { useUserSettings } from "./hooks/useUserSettings";
 import { useClipJobs } from "./hooks/useClipJobs";
 import { ProviderId, DEFAULT_PROVIDER } from "./lib/providers";
 
-export let API_URL =
-  localStorage.getItem("ac_backend_url") ||
-  (import.meta as any).env?.VITE_API_URL ||
-  (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    ? "http://127.0.0.1:8000"
-    : window.location.origin);
+export let API_URL = (() => {
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    return window.location.origin;
+  }
+  return localStorage.getItem("ac_backend_url") || (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
+})();
 
 export function setApiUrl(url: string) {
   API_URL = url.trim().replace(/\/+$/, "");
