@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-httpx
-yt-dlp
-openai
-opencv-python-headless
-google-genai
-python-multipart
-faster-whisper
